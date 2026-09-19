@@ -1,0 +1,23 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - always_declare_return_types
+    - avoid_dynamic_calls
+    - cancel_subscriptions
+    - comment_references
+    - directives_ordering
+    - prefer_final_locals
+    - prefer_relative_imports
+    - prefer_single_quotes
+    - public_member_api_docs
+    - require_trailing_commas
+    - sort_pub_dependencies
+    - unawaited_futures
+    - use_super_parameters

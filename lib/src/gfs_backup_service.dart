@@ -34,6 +34,7 @@ library;
 import 'dart:typed_data';
 
 import 'backup_backend.dart';
+import 'dated_file_name.dart';
 import 'gfs_retention.dart';
 
 /// Produces the raw plaintext bytes of one backup generation — a
@@ -260,18 +261,11 @@ class GfsBackupService {
   }
 
   /// Parses the calendar date out of `<filePrefix>-<yyyy-mm-dd>.enc`, or
-  /// `null` for any name that doesn't match (foreign files are ignored,
-  /// never purged).
-  DateTime? parseDateFromFileName(String name) {
-    final prefix = '$filePrefix-';
-    if (!name.startsWith(prefix) || !name.endsWith('.enc')) return null;
-    final middle = name.substring(prefix.length, name.length - '.enc'.length);
-    final parts = middle.split('-');
-    if (parts.length != 3) return null;
-    final y = int.tryParse(parts[0]);
-    final m = int.tryParse(parts[1]);
-    final d = int.tryParse(parts[2]);
-    if (y == null || m == null || d == null) return null;
-    return DateTime.utc(y, m, d);
-  }
+  /// `null` for any name that doesn't match. Foreign names are ignored,
+  /// never counted and never purged.
+  ///
+  /// Shares its rule with `LocalArchiveRotator.parseDateFromFileName`:
+  /// the two rotations cannot disagree about what a name means.
+  DateTime? parseDateFromFileName(String name) =>
+      parseDatedFileName(name, prefix: filePrefix, suffix: '.enc');
 }

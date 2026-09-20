@@ -19,7 +19,14 @@
 ///     generation dated the 1st is kept as that month's representative.
 /// A date can satisfy more than one tier at once (e.g. today is both a
 /// "daily" and, if it's a Sunday, a "weekly" — kept once, not duplicated).
-/// Anything present but not selected by any tier is purged.
+/// Anything present, in the past, and selected by no tier is purged.
+///
+/// A date AFTER the reference day is never purged. Every tier looks
+/// backwards, so the future is this plan's blind spot — and a blind spot
+/// is not a licence to delete. Clock skew between two devices is enough to
+/// produce one, and erasing a backup that was just written is the worst
+/// thing a rotation can do. Such dates are reported separately, in
+/// `GfsRetentionPlan.ignored`.
 library;
 
 /// One retained generation, with the tier(s) that justify keeping it.
@@ -53,13 +60,27 @@ enum BackupTier {
 /// and which to purge.
 class GfsRetentionPlan {
   /// Wraps an already-computed decision. Use [compute] to derive one.
-  const GfsRetentionPlan({required this.keep, required this.purge});
+  const GfsRetentionPlan({
+    required this.keep,
+    required this.purge,
+    this.ignored = const <DateTime>[],
+  });
 
   /// Generations to keep, newest first, each with its justifying tier(s).
   final List<RetainedBackup> keep;
 
-  /// Dates to delete, newest first — present, but retained by no tier.
+  /// Dates to delete, newest first — present, in the past, and retained
+  /// by no tier.
   final List<DateTime> purge;
+
+  /// Dates present but falling AFTER the reference day, newest first.
+  ///
+  /// The plan declines to judge them: they are in neither [keep] nor
+  /// [purge], and a caller must leave them where they are. They are
+  /// surfaced rather than swallowed so an application can tell its user
+  /// that a generation is dated in the future, which almost always means
+  /// a clock is wrong somewhere.
+  final List<DateTime> ignored;
 
   /// Classifies [presentDates] against [now] and returns the retention
   /// decision. [presentDates] need not be sorted or deduplicated, and
@@ -114,10 +135,16 @@ class GfsRetentionPlan {
         .toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
-    final purge = present.difference(keepMap.keys.toSet()).toList()
+    final ignored = present.where((d) => d.isAfter(today)).toList()
       ..sort((a, b) => b.compareTo(a));
 
-    return GfsRetentionPlan(keep: keep, purge: purge);
+    final purge = present
+        .difference(keepMap.keys.toSet())
+        .where((d) => !d.isAfter(today))
+        .toList()
+      ..sort((a, b) => b.compareTo(a));
+
+    return GfsRetentionPlan(keep: keep, purge: purge, ignored: ignored);
   }
 
   static DateTime _dateOnly(DateTime d) => DateTime.utc(d.year, d.month, d.day);

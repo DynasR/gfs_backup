@@ -326,38 +326,55 @@ void main() {
     });
   });
 
-  group('GFS — known edge: a generation dated in the future', () {
-    test('ROBUSTNESS DEFECT: a generation dated tomorrow is purged at once',
-        () {
-      // All three tiers look ONLY backwards (today - i). A generation
-      // dated after "today" is retained by no tier, so the very next
-      // rotation purges it.
-      //
-      // A plausible real scenario: two devices in different time zones, or
-      // one clock running fast — one writes `<prefix>-2026-07-16.enc`, the
-      // other rotates with today = 2026-07-15 and ERASES the backup that
-      // was just written. No warning, no trace.
-      //
-      // This test locks the CURRENT behaviour (characterization): whoever
-      // decides one day to protect future dates will land here first.
+  group('GFS — a generation dated in the future', () {
+    test('a generation dated tomorrow is NOT purged', () {
+      // Every tier looks backwards (today - i), so the future is this
+      // plan's blind spot — but a blind spot is not a licence to delete.
+      // Two devices in different time zones, or one clock running fast,
+      // is enough: one writes `<prefix>-2026-07-16.enc`, the other rotates
+      // with today = 2026-07-15. Erasing a backup that was just written is
+      // the worst thing a rotation can do.
       final plan = GfsRetentionPlan.compute(
         now: DateTime.utc(2026, 7, 15),
         presentDates: [DateTime.utc(2026, 7, 16)],
       );
+      expect(plan.purge, isEmpty);
       expect(plan.keep, isEmpty);
-      expect(plan.purge, [DateTime.utc(2026, 7, 16)]);
+      expect(plan.ignored, [DateTime.utc(2026, 7, 16)]);
     });
 
-    test('not even a future Sunday or a future 1st is protected', () {
+    test('future dates are reported newest first, never mixed into purge', () {
       final plan = GfsRetentionPlan.compute(
         now: DateTime.utc(2026, 7, 15),
         presentDates: [
           DateTime.utc(2026, 7, 19), // a Sunday, in the future
           DateTime.utc(2026, 8, 1), // the 1st of a month, in the future
+          DateTime.utc(2024, 3, 14), // genuinely stale
         ],
       );
+      expect(plan.ignored, [
+        DateTime.utc(2026, 8, 1),
+        DateTime.utc(2026, 7, 19),
+      ]);
+      expect(plan.purge, [DateTime.utc(2024, 3, 14)]);
       expect(plan.keep, isEmpty);
-      expect(plan.purge, hasLength(2));
+    });
+
+    test('today is never "in the future", whatever the time of day', () {
+      final plan = GfsRetentionPlan.compute(
+        now: DateTime.utc(2026, 7, 15, 0, 0, 1),
+        presentDates: [DateTime.utc(2026, 7, 15, 23, 59, 59)],
+      );
+      expect(plan.ignored, isEmpty);
+      expect(plan.keep.single.tiers, contains(BackupTier.daily));
+    });
+
+    test('`ignored` is empty when nothing is dated ahead', () {
+      final plan = GfsRetentionPlan.compute(
+        now: DateTime.utc(2026, 7, 15),
+        presentDates: [DateTime.utc(2026, 7, 14), DateTime.utc(2024, 1, 1)],
+      );
+      expect(plan.ignored, isEmpty);
     });
   });
 }

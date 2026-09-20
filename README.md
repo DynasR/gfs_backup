@@ -19,8 +19,8 @@ and no opinion about where your bytes go.
 ```
 
 A date can satisfy several tiers at once — today's generation on a Sunday the
-1st is the daily, the weekly and the monthly, stored once. Anything present
-that no tier claims is purged.
+1st is the daily, the weekly and the monthly, stored once. Anything present,
+in the past, that no tier claims is purged — a date in the future never is.
 
 ## Install
 
@@ -139,32 +139,45 @@ launch" is safe to call as often as you like.
   `<filePrefix>-<yyyy-mm-dd><suffix>` is foreign to the rotation, and so can
   never be purged by it.
 
-## Known limits
+## Safety properties
 
-Honest, and locked by characterization tests in `test/`:
+The only thing this package does is decide what to delete, so it is worth
+being explicit about what it will never do:
 
-- **A generation dated in the future is purged on the next rotation.** All
-  three tiers look backwards from "today". Two devices in different time zones,
-  or one clock running fast, can therefore erase a backup that was just
-  written. Keep one clock authoritative, or pass a `now` you control.
-- **`GfsBackupService.parseDateFromFileName` does not check field widths** (it
-  accepts `myapp-26-7-1.enc`), while `LocalArchiveRotator` demands `4-2-2`. A
-  name written by something other than this package, and not zero-padded, is
-  parsed into an implausible date and then "purged" under a padded name that
-  does not exist: the real file survives and the run report claims a deletion
-  that never happened. Files this package writes are always zero-padded.
-- **Out-of-range months and days overflow rather than being rejected**
-  (`2026-13-45` becomes `2027-02-14`), a consequence of `DateTime.utc`
-  normalization.
+- **It never purges a date in the future.** Every tier looks backwards, so a
+  generation dated after "today" belongs to no window — but a blind spot is
+  not a licence to delete. Clock skew between two devices is enough to produce
+  one, and erasing a backup that was just written is the worst thing a rotation
+  can do. Such dates are reported in `GfsRetentionPlan.ignored`, left where
+  they are, so you can tell the user a clock is wrong somewhere.
+- **It never touches a file it did not write.** A name must match
+  `<prefix>-<yyyy-mm-dd><suffix>` exactly — zero-padded to 4-2-2, and denoting
+  a real calendar date, since `DateTime.utc` would otherwise normalize
+  `2026-13-45` into 2027-02-14 and `2026-02-30` into 2 March. Both rotations
+  share one parser, so they cannot disagree about what a name means. Anything
+  else in the folder is invisible to the rotation.
+- **It never purges before the new generation is safely written.** The upload
+  comes first, always; a test locks the ordering.
+- **`GfsRetentionPlan.compute` is the dry run.** It is pure, so you can show a
+  user exactly what a rotation would delete before letting it run.
+
+Two things to know rather than to fear:
+
+- If a delete fails, the exception propagates and the rest of that run's purge
+  does not happen. Nothing is lost — the new generation was already written —
+  and the next run catches up.
+- Dates are reduced using the fields of the `now` you pass: a local `DateTime`
+  gives the local day, a UTC one the UTC day. Across devices, keep one
+  convention.
 
 ## Tests
 
-Around 1300 lines of tests for roughly 400 lines of source, run with
+78 tests, around 1400 lines for roughly 400 lines of source, run with
 `dart test`. They cover the boundary of each tier from both sides, daylight
 saving transitions, leap years, year wraps, non-UTC inputs, empty and
-degenerate inputs, foreign file names, partial-failure propagation, and the
-ordering guarantee that nothing is ever purged before the new generation is
-safely written.
+degenerate inputs, foreign and malformed file names, future-dated
+generations, partial-failure propagation, and the ordering guarantee that
+nothing is ever purged before the new generation is safely written.
 
 ## License
 

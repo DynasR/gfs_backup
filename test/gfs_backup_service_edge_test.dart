@@ -258,55 +258,56 @@ void main() {
     });
   });
 
-  group(
-      'GfsBackupService — known edge: lenient parser vs '
-      'LocalArchiveRotator', () {
+  group('GfsBackupService — strict name parsing', () {
     test(
-        'DEFECT: a non-zero-padded date is accepted, then "purged" under '
-        'a different name (the real file survives, the report lies)', () async {
-      // `GfsBackupService.parseDateFromFileName` does NOT check field
-      // widths, unlike `LocalArchiveRotator`, which demands 4-2-2. So
-      // `app-26-7-1.enc` parses as year 26 → outside every window → the
-      // purge rebuilds the name through `isoDate`, which zero-pads month
-      // and day: `app-26-07-01.enc`. That file does not exist. Net
-      // result: the real file is NEVER deleted (a silent leak) and
-      // `result.purged` reports a deletion that never happened.
-      //
-      // Characterization test: it locks the CURRENT behaviour and stands
-      // as the proof for the fix (aligning the two parsers).
+        'a non-zero-padded name is foreign: not parsed, not purged, not '
+        'touched', () async {
+      // A name this rotation never writes. Before the two parsers were
+      // aligned, `app-26-7-1.enc` parsed as year 26, fell outside every
+      // window, and the purge then rebuilt a zero-padded name that did not
+      // exist: the real file survived and `purged` reported a deletion
+      // that had never happened.
       final backend = _FakeBackend();
       backend.uploads['b/daily/app-26-7-1.enc'] = Uint8List.fromList([9]);
 
       final result =
           await _service(backend, now: DateTime.utc(2026, 7, 15)).backupNow();
 
-      expect(result.purged, contains(DateTime.utc(26, 7, 1)));
-      // The delete targeted a zero-padded name — a different file.
-      expect(backend.deleteCalls, contains('b/daily/app-26-07-01.enc'));
-      // ... and the real file is still there.
+      expect(result.purged, isEmpty);
+      expect(backend.deleteCalls, isEmpty);
       expect(backend.uploads.keys, contains('b/daily/app-26-7-1.enc'));
     });
 
-    test(
-        'DEFECT: an out-of-range month/day is "normalized" into a real '
-        'date instead of being rejected', () async {
-      // `DateTime.utc(2026, 13, 45)` does not throw: it overflows into
-      // 2027-02-14, so a corrupted name becomes a plausible date.
+    test('an out-of-range month or day is rejected, never normalized', () {
       final service = _service(_FakeBackend(), now: DateTime.utc(2026, 7, 15));
+      // `DateTime.utc(2026, 13, 45)` does not throw, it overflows into
+      // 2027-02-14. A corrupted name must not become a plausible date.
+      expect(service.parseDateFromFileName('app-2026-13-45.enc'), isNull);
+      expect(service.parseDateFromFileName('app-2026-02-30.enc'), isNull);
+      expect(service.parseDateFromFileName('app-2026-00-10.enc'), isNull);
+      expect(service.parseDateFromFileName('app-2026-07-00.enc'), isNull);
+      // A real leap day still parses.
       expect(
-        service.parseDateFromFileName('app-2026-13-45.enc'),
-        DateTime.utc(2027, 2, 14),
-      );
-      // For comparison the local rotator overflows the same way — but it
-      // does at least reject the field widths.
-      expect(
-        service.parseDateFromFileName('app-2026-7-15.enc'),
-        isNotNull,
-        reason: 'field width unchecked on the GfsBackupService side',
+        service.parseDateFromFileName('app-2028-02-29.enc'),
+        DateTime.utc(2028, 2, 29),
       );
     });
 
-    test('LocalArchiveRotator REJECTS those same names (the asymmetry)', () {
+    test('a generation dated in the future is never deleted', () async {
+      final backend = _FakeBackend();
+      backend.uploads['b/daily/app-2026-07-16.enc'] = Uint8List.fromList([9]);
+
+      final plan =
+          await _service(backend, now: DateTime.utc(2026, 7, 15)).rotateNow();
+
+      expect(plan.purge, isEmpty);
+      expect(plan.ignored, [DateTime.utc(2026, 7, 16)]);
+      expect(backend.deleteCalls, isEmpty);
+      expect(backend.uploads.keys, contains('b/daily/app-2026-07-16.enc'));
+    });
+
+    test('both parsers agree, name for name', () {
+      final service = _service(_FakeBackend(), now: DateTime.utc(2026, 7, 15));
       final rotator = LocalArchiveRotator(
         filePrefix: 'app',
         fileSuffix: '.enc',
@@ -315,8 +316,39 @@ void main() {
         list: () async => const [],
         delete: (_) async => true,
       );
-      expect(rotator.parseDateFromFileName('app-26-7-1.enc'), isNull);
-      expect(rotator.parseDateFromFileName('app-2026-7-15.enc'), isNull);
+      const names = [
+        'app-26-7-1.enc',
+        'app-2026-7-15.enc',
+        'app-2026-13-45.enc',
+        'app-2026-02-30.enc',
+        'app-2026-07-15.enc',
+        'app-2028-02-29.enc',
+        'other-2026-07-15.enc',
+        'app-2026-07-15.sqlite',
+        'app-.enc',
+        '',
+      ];
+      for (final name in names) {
+        expect(
+          service.parseDateFromFileName(name),
+          rotator.parseDateFromFileName(name),
+          reason: name,
+        );
+      }
+    });
+
+    test('a name too short for its own prefix and suffix is rejected', () {
+      // `app-` starts with the prefix AND ends with the suffix: the two
+      // overlap, and a naive substring would throw a RangeError.
+      final rotator = LocalArchiveRotator(
+        filePrefix: 'app',
+        fileSuffix: 'p-',
+        snapshotBytes: () async => Uint8List(0),
+        write: (_, __) async {},
+        list: () async => const [],
+        delete: (_) async => true,
+      );
+      expect(rotator.parseDateFromFileName('app-'), isNull);
     });
   });
 

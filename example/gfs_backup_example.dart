@@ -24,6 +24,7 @@ void _theDecisionAlone() {
       DateTime.utc(2026, 7, 12), // Sunday of this week
       DateTime.utc(2026, 7, 1), // 1st of this month
       DateTime.utc(2026, 2, 3), // stale: no tier claims it
+      DateTime.utc(2026, 7, 16), // tomorrow: never purged, whatever the tiers
     ],
   );
 
@@ -34,6 +35,9 @@ void _theDecisionAlone() {
   }
   for (final date in plan.purge) {
     print('  purge ${_iso(date)}');
+  }
+  for (final date in plan.ignored) {
+    print('  leave ${_iso(date)}  (dated ahead of today)');
   }
 }
 

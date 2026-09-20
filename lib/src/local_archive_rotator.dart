@@ -16,6 +16,7 @@ library;
 import 'dart:typed_data';
 
 import 'backup_backend.dart';
+import 'dated_file_name.dart';
 import 'gfs_retention.dart';
 
 /// Result of a single [LocalArchiveRotator.archiveNow] run.
@@ -144,20 +145,9 @@ class LocalArchiveRotator {
   /// Parses the calendar date out of an archive file name, or `null` for
   /// any name that doesn't match the exact
   /// `<filePrefix>-<yyyy-mm-dd><fileSuffix>` shape.
-  DateTime? parseDateFromFileName(String name) {
-    final prefix = '$filePrefix-';
-    if (!name.startsWith(prefix) || !name.endsWith(fileSuffix)) return null;
-    final middle =
-        name.substring(prefix.length, name.length - fileSuffix.length);
-    final parts = middle.split('-');
-    if (parts.length != 3) return null;
-    final y = int.tryParse(parts[0]);
-    final m = int.tryParse(parts[1]);
-    final d = int.tryParse(parts[2]);
-    if (y == null || m == null || d == null) return null;
-    if (parts[0].length != 4 || parts[1].length != 2 || parts[2].length != 2) {
-      return null;
-    }
-    return DateTime.utc(y, m, d);
-  }
+  ///
+  /// Shares its rule with `GfsBackupService.parseDateFromFileName`: the
+  /// two rotations cannot disagree about what a name means.
+  DateTime? parseDateFromFileName(String name) =>
+      parseDatedFileName(name, prefix: filePrefix, suffix: fileSuffix);
 }
